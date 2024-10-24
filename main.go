@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"log"
 	"net"
+	"strings"
 	"sync"
 )
 
@@ -32,8 +34,59 @@ func main() {
 		clients[conn] = struct{}{}
 		clientsMu.Unlock()
 
-		go handleConnection(conn)
+		go handleConnectionEOF(conn)
 	}
+}
+
+func handleConnectionEOF(conn net.Conn) {
+	defer conn.Close()
+
+	var messageBuffer []byte
+
+	for {
+		buffer := make([]byte, 1024)
+		n, err := conn.Read(buffer)
+		if err != nil {
+			log.Println("Error reading from connection:", err)
+			return
+		}
+
+		messageBuffer = append(messageBuffer, buffer[:n]...)
+
+		if bytes.Contains(messageBuffer, []byte("<EOF>")) {
+			break // End of File
+		}
+	}
+
+	message := string(messageBuffer)
+
+	replaced := strings.ReplaceAll(message, "<EOF>", "\n")
+	clientsMu.Lock()
+
+	for client := range clients {
+		if client != conn {
+			client.Write([]byte(replaced))
+		}
+	}
+
+	clientsMu.Unlock()
+
+	// parts := strings.Split(message, "<EOF>")
+	// for _, part := range parts {
+	// 	if part != "" {
+	// 		log.Print("Received:", part)
+	//
+	// 		clientsMu.Lock()
+	//
+	// 		for client := range clients {
+	// 			if client != conn {
+	// 				client.Write([]byte(part))
+	// 			}
+	// 		}
+	//
+	// 		clientsMu.Unlock()
+	// 	}
+	// }
 }
 
 func handleConnection(conn net.Conn) {

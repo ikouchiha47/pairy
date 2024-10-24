@@ -75,8 +75,9 @@ function M.serverD()
 		vim.schedule_wrap(function()
 			local msg = M.currentBuffer()
 			if msg ~= "" then
-				print(msg)
+				print("sending", msg)
 				M.Send(msg)
+				print("done")
 			end
 		end)
 	)
@@ -116,7 +117,7 @@ function M.Send(message)
 		return
 	end
 
-	local outgoingMsg = message .. "\n"
+	local outgoingMsg = message .. "<EOF>"
 	local currHash = md5.sum(outgoingMsg)
 
 	-- Send message followed by a newline
@@ -161,7 +162,9 @@ end
 
 function M.currentBuffer()
 	local buffer = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-	local buffer_string = table.concat(buffer)
+	local buffer_string = table.concat(buffer, "\n")
+
+	print(buffer_string)
 
 	if buffer_string == "" then
 		return ""
