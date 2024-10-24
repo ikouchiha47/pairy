@@ -51,7 +51,10 @@ func handleConnection(conn net.Conn) {
 		clientsMu.Lock()
 		for client := range clients {
 			if client != conn { // Don't send the message back to the sender
-				client.Write([]byte(message))
+				_, err := client.Write([]byte(message))
+				if err != nil {
+					log.Printf("Error writing to client %v\n", err)
+				}
 			}
 		}
 		clientsMu.Unlock()
