@@ -60,11 +60,35 @@ function M.Connect(address)
 	M.conn:settimeout(0)
 	M.lconn:settimeout(0)
 
+	M.serverD()
+	M.receiverD()
+end
+
+function M.serverD()
+	vim.loop.new_timer():start(
+		0,
+		500,
+		vim.schedule_wrap(function()
+			local msg = M.currentBuffer()
+			if msg ~= "" then
+				print(msg)
+				M.Send(msg)
+			end
+		end)
+	)
+end
+
+function M.receiverD()
+	if not M.conn then
+		print("No active remote connection.")
+		return
+	end
+
 	vim.loop.new_timer():start(
 		0,
 		100,
 		vim.schedule_wrap(function()
-			local line, err = M.conn:receive("*l")
+			local line, err = M.lconn:receive("*l")
 
 			-- Handle only if there's no error (no message or timeout will not block)
 			if not line and err ~= "timeout" then
@@ -79,6 +103,23 @@ function M.Connect(address)
 			end
 		end)
 	)
+end
+
+-- Send a message to the Go server
+function M.Send(message)
+	if not M.lconn then
+		print("No active remote connection")
+		return
+	end
+
+	print(message .. "\n")
+	-- Send message followed by a newline
+	local success, err = M.conn:send(message .. "\n")
+	if not success then
+		print("Failed to send message:", err)
+	else
+		print("Sent message: " .. message)
+	end
 end
 
 function M.parse(data)
@@ -99,21 +140,15 @@ function M.parse(data)
 	end
 end
 
--- Send a message to the Go server
-function M.Send(message)
-	if not M.lconn then
-		print("No active connection. Please connect first.")
-		return
+function M.currentBuffer()
+	local buffer = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	local buffer_string = table.concat(buffer)
+
+	if buffer_string == "" then
+		return ""
 	end
 
-	print(message .. "\n")
-	-- Send message followed by a newline
-	local success, err = M.lconn:send(message .. "\n")
-	if not success then
-		print("Failed to send message:", err)
-	else
-		print("Sent message: " .. message)
-	end
+	return "i|" .. buffer_string
 end
 
 -- Close the connection
