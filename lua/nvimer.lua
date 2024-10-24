@@ -13,11 +13,15 @@
 --
 -- ]]
 
+local md5 = require("md5")
+
 local M = {
 	socket = nil,
 	conn = nil,
 	lconn = nil,
 	thread = nil,
+	prevHash = "",
+	prevRecvdHash = "",
 }
 
 local laddr = "0.0.0.0"
@@ -112,17 +116,30 @@ function M.Send(message)
 		return
 	end
 
-	print(message .. "\n")
+	local outgoingMsg = message .. "\n"
+	local currHash = md5.sum(outgoingMsg)
+
 	-- Send message followed by a newline
-	local success, err = M.conn:send(message .. "\n")
+	if M.prevRecvdHash == currHash then
+		return
+	end
+
+	local success, err = M.conn:send(outgoingMsg)
 	if not success then
 		print("Failed to send message:", err)
 	else
+		M.prevRecvdHash = currHash
 		print("Sent message: " .. message)
 	end
 end
 
 function M.parse(data)
+	local currHash = md5.sum(data)
+	if M.prevHash == currHash then
+		return
+	end
+
+	M.prevHash = currHash
 	local mode, line = data:match("^(%a)|(.+)$")
 
 	if mode == "i" then
