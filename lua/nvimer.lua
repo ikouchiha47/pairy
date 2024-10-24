@@ -73,12 +73,30 @@ function M.Connect(address)
 			elseif line then
 				-- Received message successfully
 				vim.schedule(function()
-					print("Received from server: " .. line)
-					vim.api.nvim_command("execute 'normal! i" .. line .. "'")
+					-- vim.api.nvim_command("execute 'normal! i" .. line .. "'")
+					M.parse(line)
 				end)
 			end
 		end)
 	)
+end
+
+function M.parse(data)
+	local mode, line = data:match("^(%a)|(.+)$")
+
+	if mode == "i" then
+		vim.schedule(function()
+			print("Received text to insert: " .. line)
+			vim.api.nvim_put({ line }, "l", true, true)
+		end)
+	elseif mode == "v" then
+		vim.schedule(function()
+			print("Executing Vim command: " .. line)
+			vim.api.nvim_command(line)
+		end)
+	else
+		print("Unsupported mode received:", mode)
+	end
 end
 
 -- Send a message to the Go server
@@ -88,6 +106,7 @@ function M.Send(message)
 		return
 	end
 
+	print(message .. "\n")
 	-- Send message followed by a newline
 	local success, err = M.lconn:send(message .. "\n")
 	if not success then
