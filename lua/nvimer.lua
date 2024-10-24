@@ -75,9 +75,7 @@ function M.serverD()
 		vim.schedule_wrap(function()
 			local msg = M.currentBuffer()
 			if msg ~= "" then
-				print("sending", msg)
 				M.Send(msg)
-				print("done")
 			end
 		end)
 	)
@@ -99,10 +97,12 @@ function M.receiverD()
 			if not line and err ~= "timeout" then
 				print("Receive error:", err)
 				return
+			elseif err and err ~= "timeout" then
+				print("Remote connection closed. Pair again when remote online")
+				M.UnPair()
+				return
 			elseif line then
-				-- Received message successfully
 				vim.schedule(function()
-					-- vim.api.nvim_command("execute 'normal! i" .. line .. "'")
 					M.parse(line)
 				end)
 			end
@@ -125,12 +125,13 @@ function M.Send(message)
 		return
 	end
 
+	print("sending", outgoingMsg)
 	local success, err = M.conn:send(outgoingMsg)
 	if not success then
 		print("Failed to send message:", err)
 	else
 		M.prevRecvdHash = currHash
-		print("Sent message: " .. message)
+		print("Sent message")
 	end
 end
 

@@ -60,33 +60,34 @@ func handleConnectionEOF(conn net.Conn) {
 
 	message := string(messageBuffer)
 
-	replaced := strings.ReplaceAll(message, "<EOF>", "\n")
-	clientsMu.Lock()
-
-	for client := range clients {
-		if client != conn {
-			client.Write([]byte(replaced))
-		}
-	}
-
-	clientsMu.Unlock()
-
-	// parts := strings.Split(message, "<EOF>")
-	// for _, part := range parts {
-	// 	if part != "" {
-	// 		log.Print("Received:", part)
+	// replaced := strings.ReplaceAll(message, "<EOF>", "\n")
+	// clientsMu.Lock()
 	//
-	// 		clientsMu.Lock()
-	//
-	// 		for client := range clients {
-	// 			if client != conn {
-	// 				client.Write([]byte(part))
-	// 			}
-	// 		}
-	//
-	// 		clientsMu.Unlock()
+	// for client := range clients {
+	// 	if client != conn {
+	// 		client.Write([]byte(replaced))
 	// 	}
 	// }
+
+	// clientsMu.Unlock()
+
+	// Keep Replacing because we are replacing full buffer
+	parts := strings.Split(message, "<EOF>")
+	for _, part := range parts {
+		if part != "" {
+			log.Print("Received:", part)
+
+			clientsMu.Lock()
+
+			for client := range clients {
+				if client != conn {
+					client.Write([]byte(part))
+				}
+			}
+
+			clientsMu.Unlock()
+		}
+	}
 }
 
 func handleConnection(conn net.Conn) {
