@@ -88,7 +88,7 @@ function M.receiverD()
 		0,
 		100,
 		vim.schedule_wrap(function()
-			local line, err = M.lconn:receive("*l")
+			local line, err = M.conn:receive("*l")
 
 			-- Handle only if there's no error (no message or timeout will not block)
 			if not line and err ~= "timeout" then
@@ -114,7 +114,7 @@ function M.Send(message)
 
 	print(message .. "\n")
 	-- Send message followed by a newline
-	local success, err = M.conn:send(message .. "\n")
+	local success, err = M.lconn:send(message .. "\n")
 	if not success then
 		print("Failed to send message:", err)
 	else
