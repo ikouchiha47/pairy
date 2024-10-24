@@ -8,6 +8,8 @@
 
 ## Install
 
+`make setup`
+
 ```lua
 return {
   name = 'pairy',
