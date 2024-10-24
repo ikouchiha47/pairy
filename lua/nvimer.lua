@@ -57,24 +57,28 @@ function M.Connect(address)
 
 	print("Connected to " .. laddr)
 
-	-- Start a coroutine to handle receiving messages
-	M.thread = vim.schedule_wrap(function()
-		while true do
+	M.conn:settimeout(0)
+	M.lconn:settimeout(0)
+
+	vim.loop.new_timer():start(
+		0,
+		100,
+		vim.schedule_wrap(function()
 			local line, err = M.conn:receive("*l")
-			if err then
+
+			-- Handle only if there's no error (no message or timeout will not block)
+			if not line and err ~= "timeout" then
 				print("Receive error:", err)
-				break
+				return
+			elseif line then
+				-- Received message successfully
+				vim.schedule(function()
+					print("Received from server: " .. line)
+					vim.api.nvim_command("execute 'normal! i" .. line .. "'")
+				end)
 			end
-
-			vim.schedule(function()
-				print("Received from server: " .. line)
-				vim.api.nvim_command("execute 'normal! i" .. line .. "'")
-			end)
-		end
-	end)
-
-	-- Run the coroutine for receiving messages
-	M.thread()
+		end)
+	)
 end
 
 -- Send a message to the Go server
