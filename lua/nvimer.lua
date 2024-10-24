@@ -97,10 +97,6 @@ function M.receiverD()
 			if not line and err ~= "timeout" then
 				print("Receive error:", err)
 				return
-			elseif err and err ~= "timeout" then
-				print("Remote connection closed. Pair again when remote online")
-				M.UnPair()
-				return
 			elseif line then
 				vim.schedule(function()
 					M.parse(line)
@@ -117,7 +113,7 @@ function M.Send(message)
 		return
 	end
 
-	local outgoingMsg = message .. "<EOF>"
+	local outgoingMsg = message .. "\n"
 	local currHash = md5.sum(outgoingMsg)
 
 	-- Send message followed by a newline
@@ -144,6 +140,8 @@ function M.parse(data)
 	M.prevHash = currHash
 	local mode, line = data:match("^(%a)|(.+)$")
 
+	line = line:gsub("\\xn", "\n")
+
 	if mode == "i" then
 		vim.schedule(function()
 			print("Received text to insert: " .. line)
@@ -163,7 +161,7 @@ end
 
 function M.currentBuffer()
 	local buffer = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-	local buffer_string = table.concat(buffer, "\n")
+	local buffer_string = table.concat(buffer, "\\xn")
 
 	print(buffer_string)
 

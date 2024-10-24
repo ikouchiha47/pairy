@@ -34,7 +34,7 @@ func main() {
 		clients[conn] = struct{}{}
 		clientsMu.Unlock()
 
-		go handleConnectionEOF(conn)
+		go handleConnection(conn)
 	}
 }
 
@@ -48,7 +48,7 @@ func handleConnectionEOF(conn net.Conn) {
 		n, err := conn.Read(buffer)
 		if err != nil {
 			log.Println("Error reading from connection:", err)
-			return
+			continue
 		}
 
 		messageBuffer = append(messageBuffer, buffer[:n]...)
@@ -72,6 +72,8 @@ func handleConnectionEOF(conn net.Conn) {
 	// clientsMu.Unlock()
 
 	// Keep Replacing because we are replacing full buffer
+	message = strings.ReplaceAll(message, "\n", "\\n")
+
 	parts := strings.Split(message, "<EOF>")
 	for _, part := range parts {
 		if part != "" {
