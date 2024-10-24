@@ -1,13 +1,23 @@
-package.path = package.path .. ";/home/darksied/dev/pairy/lua/lua_modules/share/lua/5.1/?.lua"
-package.cpath = package.cpath .. ";/home/darksied/dev/pairy/lua/lua_modules/lib/lua/5.1/?.so"
+local function get_script_path()
+	local str = debug.getinfo(2, "S").source:sub(2)
+	return str:match("(.*/pairy)")
+end
 
-local socket = require("socket")
-local conn
+local cwd = get_script_path()
 
-local M = {}
+local M = {
+	socket = nil,
+}
+
+function M.setup(pwd)
+	package.path = package.path .. ";" .. pwd .. "/lua/lua_modules/share/lua/5.1/?.lua"
+	package.cpath = package.cpath .. ";" .. pwd .. "/lua/lua_modules/lib/lua/5.1/?.so"
+
+	M.socket = require("socket")
+end
 
 function M.Connect(address)
-	conn = socket.tcp()
+	local conn = M.socket.tcp()
 	conn:settimeout(5) -- Set timeout for connection
 	local success, err = conn:connect(address, 8080)
 
@@ -26,6 +36,7 @@ function M.Connect(address)
 			end
 
 			-- Process received command
+			print("Received " .. line)
 			vim.api.nvim_command("execute 'normal! i' .. '" .. line .. "'")
 		end
 	end)

@@ -6,6 +6,19 @@
 - go
 - neovim
 
+## Install
+
+```lua
+return {
+  name = 'pairy',
+  dir = '/path/to/pairy',
+  config = function()
+    local Pairy = require 'nvimer'
+    Pairy.setup '/path/to/pairy' -- Pass the project root as pwd
+  end,
+}
+```
+
 ## Usage
 
 - `:Pair <address>`
