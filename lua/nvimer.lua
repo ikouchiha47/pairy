@@ -145,7 +145,9 @@ function M.parse(data)
 	if mode == "i" then
 		vim.schedule(function()
 			print("Received text to insert: " .. line)
-			vim.api.nvim_put({ line }, "l", true, true)
+			-- vim.api.nvim_put({ line }, "l", true, true)
+			local buf = vim.api.nvim_get_current_buf()
+			vim.api.nvim_buf_set_lines(buf, 0, -1, false, { line })
 		end)
 	elseif mode == "v" then
 		vim.schedule(function()
