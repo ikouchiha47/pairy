@@ -7,6 +7,7 @@ local cwd = get_script_path()
 
 local M = {
 	socket = nil,
+	conn = nil,
 }
 
 function M.setup(pwd)
@@ -17,9 +18,10 @@ function M.setup(pwd)
 end
 
 function M.Connect(address)
-	local conn = M.socket.tcp()
-	conn:settimeout(5) -- Set timeout for connection
-	local success, err = conn:connect(address, 8080)
+	M.conn = M.socket.tcp()
+	M.conn:settimeout(5)
+
+	local success, err = M.conn:connect(address, 8080)
 
 	if not success then
 		print("Connection failed:", err)
@@ -28,18 +30,43 @@ function M.Connect(address)
 
 	print("Connected to " .. address)
 
-	vim.loop.new_thread(function()
+	local socket_fd = M.conn:getfd()
+
+	local function receive_loop(fd, path, cpath)
+		print(fd, path, cpath)
+		package.path = path
+		package.cpath = cpath
+
+		local socket = require("socket")
+
+		local conn = socket.tcp()
+		conn:setfd(fd)
+		conn:settimeout(5)
+
 		while true do
 			local line, err = conn:receive("*l")
 			if err then
+				print("Receive error:", err)
 				break
 			end
-
 			-- Process received command
 			print("Received " .. line)
-			vim.api.nvim_command("execute 'normal! i' .. '" .. line .. "'")
+			vim.schedule(function()
+				vim.api.nvim_command("execute 'normal! i' .. '" .. line .. "'")
+			end)
 		end
-	end)
+	end
+
+	-- Start the thread with the connection explicitly passed
+	vim.uv.new_thread(receive_loop, socket_fd, package.path, package.cpath)
+end
+
+function M.Disconnect()
+	if M.conn then
+		M.conn:close()
+		M.conn = nil
+		print("Connection closed.")
+	end
 end
 
 return M
