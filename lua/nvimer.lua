@@ -14,6 +14,7 @@
 -- ]]
 
 local md5 = require("md5")
+local typer = require("track_typer")
 
 local M = {
 	socket = nil,
@@ -22,15 +23,27 @@ local M = {
 	thread = nil,
 	prevHash = "",
 	prevRecvdHash = "",
+
+	syncing_paused = false,
+	conflict_active = false,
+	participant_is_user = true,
+	typing_active = false,
 }
 
-local laddr = "0.0.0.0"
-local port = 8080
+local laddr = ""
+local port = 0
 
 -- Set up LuaSocket
-function M.setup(pwd)
+function M.setup(opts)
+	local pwd = opts.pwd
+
+	laddr = opts.laddr or "0.0.0.0"
+	port = opts.port or 8080
+
 	package.path = package.path .. ";" .. pwd .. "/lua/lua_modules/share/lua/5.1/?.lua"
 	package.cpath = package.cpath .. ";" .. pwd .. "/lua/lua_modules/lib/lua/5.1/?.so"
+
+	typer.setupTypingDetection()
 
 	M.socket = require("socket")
 end
@@ -74,6 +87,8 @@ function M.serverD()
 		500,
 		vim.schedule_wrap(function()
 			local msg = M.currentBuffer()
+			print("istyping", typer.isTyping())
+
 			if msg ~= "" then
 				M.Send(msg)
 			end
@@ -122,6 +137,7 @@ function M.Send(message)
 	end
 
 	print("sending", outgoingMsg)
+
 	local success, err = M.conn:send(outgoingMsg)
 	if not success then
 		print("Failed to send message:", err)
@@ -145,14 +161,16 @@ function M.parse(data)
 	if mode == "i" then
 		vim.schedule(function()
 			print("Received text to insert: " .. line)
-			-- vim.api.nvim_put({ line }, "l", true, true)
+
 			local lines = vim.split(line, "\n", { trimempty = true })
 			local buf = vim.api.nvim_get_current_buf()
+
 			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 		end)
 	elseif mode == "v" then
 		vim.schedule(function()
 			print("Executing Vim command: " .. line)
+
 			vim.api.nvim_command(line)
 		end)
 	else

@@ -11,12 +11,17 @@
 `make setup`
 
 ```lua
+local dir = '/home/darksied/dev/pairy'
+
 return {
   name = 'pairy',
-  dir = '/path/to/pairy',
+  dir = dir,
   config = function()
     local Pairy = require 'nvimer'
-    Pairy.setup '/path/to/pairy' -- Pass the project root as pwd
+    Pairy.setup {
+      dir = dir,
+      laddr = '0.0.0.0',
+    }
   end,
 }
 ```
