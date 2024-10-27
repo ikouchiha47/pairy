@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"log"
 	"net"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
+	"time"
 )
 
 var (
 	clients   = make(map[net.Conn]struct{})
 	clientsMu sync.Mutex
+	// replicaIDCounter int64 = 1
 )
 
 func main() {
@@ -20,6 +25,9 @@ func main() {
 	}
 	defer listener.Close()
 	log.Println("Server started on :8080")
+
+	// Handle graceful shutdown
+	go handleShutdown(listener)
 
 	for {
 		conn, err := listener.Accept()
@@ -32,36 +40,87 @@ func main() {
 		clients[conn] = struct{}{}
 		clientsMu.Unlock()
 
-		go handleConnection(conn)
+		go withRecovery(handleConnection)(conn)
 	}
 }
 
 func handleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		conn.Close()
+		clientsMu.Lock()
+		delete(clients, conn)
+		clientsMu.Unlock()
+	}()
+
 	reader := bufio.NewReader(conn)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Minute)) // Set read timeout
 
 	for {
 		message, err := reader.ReadString('\n')
 		if err != nil {
-			break
+			log.Printf("Error reading from client: %v", err)
+			return
 		}
 		log.Print("Received:", message)
 
-		// Broadcast message to all clients
-		clientsMu.Lock()
-		for client := range clients {
-			if client != conn { // Don't send the message back to the sender
-				_, err := client.Write([]byte(message))
-				if err != nil {
-					log.Printf("Error writing to client %v\n", err)
-				}
+		// if message == "get_replica_id\n" {
+		// 	replicaID := generateReplicaID()
+		// 	conn.Write([]byte(fmt.Sprintf("replica_id: %d\n", replicaID)))
+		// 	continue
+		// }
+
+		broadcastMessage(message, conn)
+	}
+}
+
+// func generateReplicaID() int64 {
+// 	return atomic.AddInt64(&replicaIDCounter, 1)
+// }
+
+func broadcastMessage(message string, sender net.Conn) {
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+
+	for client := range clients {
+		if client != sender {
+			_, err := client.Write([]byte(message))
+			if err != nil {
+				log.Printf("Error writing to client %v\n", err)
+				client.Close()
+				delete(clients, client)
 			}
 		}
-		clientsMu.Unlock()
 	}
+}
 
-	// Remove client from the list
+// gracefull server shutdown on SIGINT or SIGTERM
+func handleShutdown(listener net.Listener) {
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	<-stop // Wait for the signal
+
+	log.Println("Shutting down server...")
+
+	// Close all client connections
 	clientsMu.Lock()
-	delete(clients, conn)
+	for client := range clients {
+		client.Close()
+		delete(clients, client)
+	}
 	clientsMu.Unlock()
+
+	listener.Close()
+	log.Println("Server stopped")
+}
+
+func withRecovery(next func(conn net.Conn)) func(conn net.Conn) {
+	return func(conn net.Conn) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered from panic: %v", r)
+			}
+		}()
+		next(conn)
+	}
 }

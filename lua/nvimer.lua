@@ -15,12 +15,14 @@
 
 local md5 = require("md5")
 local typer = require("track_typer")
+local Crdt = require("crdtsimp")
 
 local M = {
 	socket = nil,
 	conn = nil,
 	lconn = nil,
 	thread = nil,
+	crdt = nil,
 	prevHash = "",
 	prevRecvdHash = "",
 
@@ -34,6 +36,7 @@ local laddr = ""
 local port = 0
 
 -- Set up LuaSocket
+-- TODO: capitalize exported methods
 function M.setup(opts)
 	local pwd = opts.pwd
 
@@ -43,9 +46,37 @@ function M.setup(opts)
 	package.path = package.path .. ";" .. pwd .. "/lua/lua_modules/share/lua/5.1/?.lua"
 	package.cpath = package.cpath .. ";" .. pwd .. "/lua/lua_modules/lib/lua/5.1/?.so"
 
-	typer.setupTypingDetection()
+	-- typer.setupTypingDetection()
 
 	M.socket = require("socket")
+
+	M.crdt = Crdt:new(md5.sum(M.getMacAddress()))
+end
+
+function M.getMacAddress()
+	local handle = io.popen("ifconfig")
+	if not handle then
+		return ""
+	end
+
+	local result = handle:read("*a")
+	handle:close()
+
+	for line in result:gmatch("[^\r\n]+") do
+		local mac = line:match("([%x]+:%x+:%x+:%x+:%x+:%x+)")
+		if mac then
+			return mac
+		end
+	end
+	return "00:00:00:00:00:00"
+end
+
+function M.getReplicaID(user_id)
+	local mac_address = M.getMacAddress()
+	local timestamp = os.time() -- or os.clock() for higher precision
+	local unique_id = string.format("%s-%s-%d", mac_address, user_id, timestamp)
+
+	return unique_id
 end
 
 -- Connect to the TCP server
@@ -87,7 +118,6 @@ function M.serverD()
 		500,
 		vim.schedule_wrap(function()
 			local msg = M.currentBuffer()
-			print("istyping", typer.isTyping())
 
 			if msg ~= "" then
 				M.Send(msg)
@@ -108,7 +138,6 @@ function M.receiverD()
 		vim.schedule_wrap(function()
 			local line, err = M.lconn:receive("*l")
 
-			-- Handle only if there's no error (no message or timeout will not block)
 			if not line and err ~= "timeout" then
 				print("Receive error:", err)
 				return
@@ -154,7 +183,7 @@ function M.parse(data)
 	end
 
 	M.prevHash = currHash
-	local mode, line = data:match("^(%a)|(.+)$")
+	local mode, line = self:parseOps(data)
 
 	line = line:gsub("\\xn", "\n")
 
@@ -178,17 +207,46 @@ function M.parse(data)
 	end
 end
 
-function M.currentBuffer()
-	local buffer = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-	local buffer_string = table.concat(buffer, "\\xn")
+function M:parseOps(opString)
+	local mode, ops = opString:match("^(%a)|(.+)$")
+	local operations = {}
 
-	print(buffer_string)
-
-	if buffer_string == "" then
-		return ""
+	for row, col, data, op_id in ops:gmatch("{(%d+),(%d+),(%a),(%a+)}") do
+		table.insert(operations, {
+			row = tonumber(row),
+			col = tonumber(col),
+			data = data,
+			op_id = op_id,
+		})
 	end
 
-	return "i|" .. buffer_string
+	return mode, operations
+end
+
+function M.currentBuffer()
+	local buffer = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	local operations = {}
+	local mode = "i" -- Specify the mode, assuming insert mode as example
+
+	for row, line in ipairs(buffer) do
+		for col = 1, #line do
+			local char = line:sub(col, col)
+			table.insert(operations, {
+				row = row,
+				col = col,
+				data = char,
+				op_id = "insert",
+			})
+		end
+	end
+
+	local opString = mode .. "|"
+	for _, op in ipairs(operations) do
+		opString = opString .. string.format("{%d,%d,%s,%s}", op.row, op.col, op.data, op.op_id)
+	end
+
+	print(opString)
+	return opString
 end
 
 -- Close the connection
