@@ -30,6 +30,7 @@ local M = {
 	conflict_active = false,
 	participant_is_user = true,
 	typing_active = false,
+	previousBuffer = nil,
 }
 
 local laddr = ""
@@ -49,8 +50,9 @@ function M.setup(opts)
 	-- typer.setupTypingDetection()
 
 	M.socket = require("socket")
+	M.replicaID = md5.sum(M.getMacAddress())
 
-	M.crdt = Crdt:new(md5.sum(M.getMacAddress()))
+	M.crdt = Crdt:new(M.replicaID)
 end
 
 function M.getMacAddress()
@@ -69,14 +71,6 @@ function M.getMacAddress()
 		end
 	end
 	return "00:00:00:00:00:00"
-end
-
-function M.getReplicaID(user_id)
-	local mac_address = M.getMacAddress()
-	local timestamp = os.time() -- or os.clock() for higher precision
-	local unique_id = string.format("%s-%s-%d", mac_address, user_id, timestamp)
-
-	return unique_id
 end
 
 -- Connect to the TCP server
@@ -117,11 +111,12 @@ function M.serverD()
 		0,
 		500,
 		vim.schedule_wrap(function()
-			local msg = M.currentBuffer()
-
-			if msg ~= "" then
-				M.Send(msg)
-			end
+			-- local msg = M.currentBuffer()
+			--
+			-- if msg ~= "" then
+			-- 	M.Send(msg)
+			-- end
+			M.sendBuffer()
 		end)
 	)
 end
@@ -176,14 +171,75 @@ function M.Send(message)
 	end
 end
 
-function M.parse(data)
+function M.sendBuffer()
+	if not M.lconn then
+		print("No active remote connection")
+		return
+	end
+
+	local buffer = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	local operations = M:generateSendOps(buffer)
+
+	for _, op in ipairs(operations) do
+		local message = string.format("%s|{%d,%d,%s,%s}", op.replica_id, op.row, op.col, op.data or "", op.op_id)
+		local outgoingMsg = message .. "\n"
+
+		local success, err = M.conn:send(outgoingMsg)
+		if success then
+			print("Sent message:", outgoingMsg)
+		else
+			print("Failed to send message:", err)
+		end
+	end
+
+	M.previousBuffer = buffer
+end
+
+function M:generateSendOpts(buffer)
+	local operations = {}
+
+	for row, line in ipairs(buffer) do
+		for col = 1, #line do
+			local char = line:sub(col, col)
+			table.insert(operations, {
+				replica_id = M.replica_id,
+				row = row,
+				col = col,
+				data = char,
+				op_id = "insert",
+			})
+		end
+	end
+
+	-- Track deletes by comparing with previous state (if exists)
+	if M.previousBuffer then
+		for row, prevLine in ipairs(self.previousBuffer) do
+			local currLine = buffer[row] or ""
+			for col = 1, #prevLine do
+				if col > #currLine or currLine:sub(col, col) ~= prevLine:sub(col, col) then
+					table.insert(operations, {
+						replica_id = self.replica_id,
+						row = row,
+						col = col,
+						data = prevLine:sub(col, col),
+						op_id = "remove",
+					})
+				end
+			end
+		end
+	end
+
+	return operations
+end
+
+function M.parseOld(data)
 	local currHash = md5.sum(data)
 	if M.prevHash == currHash then
 		return
 	end
 
 	M.prevHash = currHash
-	local mode, line = self:parseOps(data)
+	local mode, line = M:parseOps(data)
 
 	line = line:gsub("\\xn", "\n")
 
@@ -204,6 +260,28 @@ function M.parse(data)
 		end)
 	else
 		print("Unsupported mode received:", mode)
+	end
+end
+
+function M.parse(data)
+	local mode, operations = M:parseOps(data)
+
+	for _, op in ipairs(operations) do
+		if op.op_id == "insert" then
+			M.crdt:insert(op)
+		elseif op.op_id == "remove" then
+			M.crdt:delete(op)
+		end
+	end
+
+	if mode == "i" then
+		M.crdt:merge()
+
+		vim.schedule(function()
+			local lines = vim.split(M.crdt.content, "\n")
+			local buf = vim.api.nvim_get_current_buf()
+			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+		end)
 	end
 end
 
@@ -246,7 +324,7 @@ function M.currentBuffer()
 	end
 
 	print(opString)
-	return opString
+	return opString .. "\n"
 end
 
 -- Close the connection
