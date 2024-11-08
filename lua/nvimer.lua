@@ -25,6 +25,7 @@ local M = {
 	crdt = nil,
 	prevHash = "",
 	prevRecvdHash = "",
+	prevSentHash = "",
 
 	syncing_paused = false,
 	conflict_active = false,
@@ -50,7 +51,7 @@ function M.setup(opts)
 	-- typer.setupTypingDetection()
 
 	M.socket = require("socket")
-	M.replicaID = md5.sum(M.getMacAddress())
+	M.replicaID = md5.tohex(md5.sum(M.getMacAddress() .. tostring(os.time())))
 
 	M.crdt = Crdt:new(M.replicaID)
 end
@@ -153,8 +154,9 @@ function M.Send(message)
 	end
 
 	local outgoingMsg = message .. "\n"
-	local currHash = md5.sum(outgoingMsg)
+	local currHash = md5.tohex(md5.sum(outgoingMsg))
 
+	print("hashes", M.prevRecvdHash, currHash)
 	-- Send message followed by a newline
 	if M.prevRecvdHash == currHash then
 		return
@@ -171,6 +173,8 @@ function M.Send(message)
 	end
 end
 
+local prevMsg = ""
+
 function M.sendBuffer()
 	if not M.lconn then
 		print("No active remote connection")
@@ -178,14 +182,24 @@ function M.sendBuffer()
 	end
 
 	local buffer = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-	local operations = M:generateSendOps(buffer)
+	local operations = M:generateSendOpts(buffer)
 
 	for _, op in ipairs(operations) do
 		local message = string.format("%s|{%d,%d,%s,%s}", op.replica_id, op.row, op.col, op.data or "", op.op_id)
 		local outgoingMsg = message .. "\n"
+		local currHash = md5.tohex(md5.sum(outgoingMsg))
+
+		print("send hashes", prevMsg, M.prevRecvdHash, outgoingMsg, currHash)
+
+		if M.prevSentHash == currHash then
+			-- M.previousBuffer = buffer
+			return
+		end
 
 		local success, err = M.conn:send(outgoingMsg)
 		if success then
+			M.prevSentHash = currHash
+			prevMsg = outgoingMsg
 			print("Sent message:", outgoingMsg)
 		else
 			print("Failed to send message:", err)
@@ -198,30 +212,31 @@ end
 function M:generateSendOpts(buffer)
 	local operations = {}
 
+	-- Track changes between the current and previous buffer states
 	for row, line in ipairs(buffer) do
-		for col = 1, #line do
-			local char = line:sub(col, col)
-			table.insert(operations, {
-				replica_id = M.replica_id,
-				row = row,
-				col = col,
-				data = char,
-				op_id = "insert",
-			})
-		end
-	end
+		local prevLine = M.previousBuffer and M.previousBuffer[row] or ""
+		local maxLength = math.max(#line, #prevLine)
 
-	-- Track deletes by comparing with previous state (if exists)
-	if M.previousBuffer then
-		for row, prevLine in ipairs(self.previousBuffer) do
-			local currLine = buffer[row] or ""
-			for col = 1, #prevLine do
-				if col > #currLine or currLine:sub(col, col) ~= prevLine:sub(col, col) then
+		for col = 1, maxLength do
+			local currChar = line:sub(col, col)
+			local prevChar = prevLine:sub(col, col)
+
+			if currChar ~= prevChar then
+				if currChar ~= "" then
 					table.insert(operations, {
-						replica_id = self.replica_id,
+						replica_id = M.replicaID,
 						row = row,
 						col = col,
-						data = prevLine:sub(col, col),
+						data = currChar,
+						op_id = "insert",
+					})
+				end
+				if prevChar ~= "" then
+					table.insert(operations, {
+						replica_id = M.replicaID,
+						row = row,
+						col = col,
+						data = prevChar,
 						op_id = "remove",
 					})
 				end
@@ -233,7 +248,7 @@ function M:generateSendOpts(buffer)
 end
 
 function M.parseOld(data)
-	local currHash = md5.sum(data)
+	local currHash = md5.tohex(md5.sum(data))
 	if M.prevHash == currHash then
 		return
 	end
@@ -264,13 +279,16 @@ function M.parseOld(data)
 end
 
 function M.parse(data)
-	local mode, operations = M:parseOps(data)
+	local replica_id, operations = M:parseOps(data)
+	local mode = "n"
 
 	for _, op in ipairs(operations) do
 		if op.op_id == "insert" then
 			M.crdt:insert(op)
+			mode = "i"
 		elseif op.op_id == "remove" then
 			M.crdt:delete(op)
+			mode = "i"
 		end
 	end
 
@@ -286,19 +304,21 @@ function M.parse(data)
 end
 
 function M:parseOps(opString)
-	local mode, ops = opString:match("^(%a)|(.+)$")
+	local replica_id, ops = opString:match("^(.-)|(.+)$")
 	local operations = {}
 
-	for row, col, data, op_id in ops:gmatch("{(%d+),(%d+),(%a),(%a+)}") do
+	for row, col, data, op_id in ops:gmatch("{(%d+),(%d+),([^,]+),([^}]+)}") do
+		-- print("row", row, "col", col, "data", data, "op_id", op_id)
 		table.insert(operations, {
 			row = tonumber(row),
 			col = tonumber(col),
 			data = data,
 			op_id = op_id,
+			replica_id = replica_id,
 		})
 	end
 
-	return mode, operations
+	return replica_id, operations
 end
 
 function M.currentBuffer()

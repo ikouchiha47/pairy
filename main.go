@@ -2,9 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"log"
 	"net"
-	"os"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -23,33 +23,49 @@ func main() {
 		log.Println("Error starting server:", err)
 		return
 	}
+
 	defer listener.Close()
 	log.Println("Server started on :8080")
 
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGTERM, syscall.SIGABRT, syscall.SIGKILL,
+	)
+	defer stop()
+
+	done := make(chan struct{})
 	// Handle graceful shutdown
-	go handleShutdown(listener)
+	go handleShutdown(done, listener)
 
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Println("Error accepting connection:", err)
-			continue
+		select {
+		case <-ctx.Done():
+			done <- struct{}{}
+			return
+		default:
+			conn, err := listener.Accept()
+			if err != nil {
+				log.Println("Error accepting connection:", err)
+				continue
+			}
+
+			clientsMu.Lock()
+			clients[conn] = struct{}{}
+			clientsMu.Unlock()
+
+			go withRecovery(handleConnection)(conn)
 		}
-
-		clientsMu.Lock()
-		clients[conn] = struct{}{}
-		clientsMu.Unlock()
-
-		go withRecovery(handleConnection)(conn)
 	}
 }
 
 func handleConnection(conn net.Conn) {
 	defer func() {
 		conn.Close()
+
 		clientsMu.Lock()
+		defer clientsMu.Unlock()
+
 		delete(clients, conn)
-		clientsMu.Unlock()
 	}()
 
 	reader := bufio.NewReader(conn)
@@ -94,11 +110,12 @@ func broadcastMessage(message string, sender net.Conn) {
 }
 
 // gracefull server shutdown on SIGINT or SIGTERM
-func handleShutdown(listener net.Listener) {
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+func handleShutdown(done chan struct{}, listener net.Listener) {
+	// stop := make(chan os.Signal, 1)
+	// signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	<-stop // Wait for the signal
+	// <-stop // Wait for the signal
+	<-done
 
 	log.Println("Shutting down server...")
 
