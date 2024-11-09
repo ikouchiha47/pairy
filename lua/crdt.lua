@@ -27,6 +27,10 @@ function CRDT:gen_next_version(user)
 	return nextVersion
 end
 
+function CRDT:stateAt(row, col)
+	return self.skiplist:get(row .. ":" .. col)
+end
+
 --[[
 -- op = { row, col, data, op_id }
 --]]

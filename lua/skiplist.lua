@@ -126,7 +126,7 @@ function SkipList:get(key)
 
 	current = current.forward[1]
 	if current and current.key == key and not current.deleted then
-		return current.data
+		return current
 	else
 		return nil -- Return nil if deleted or not found
 	end

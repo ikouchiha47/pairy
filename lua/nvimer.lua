@@ -15,7 +15,7 @@
 
 local md5 = require("md5")
 local typer = require("track_typer")
-local Crdt = require("crdtsimp")
+local Crdt = require("crdt")
 
 local M = {
 	socket = nil,
@@ -90,15 +90,14 @@ function M.Connect(address)
 		return
 	end
 
-	print("Connected to " .. address)
-
 	local success, err = M.lconn:connect(laddr, port)
 	if not success then
 		print("Local connection failed:", err)
 		return
 	end
 
-	print("Connected to " .. laddr)
+	-- print("Connected to " .. laddr)
+	print("Connected " .. address)
 
 	M.conn:settimeout(0)
 	M.lconn:settimeout(0)
@@ -156,7 +155,7 @@ function M.Send(message)
 	local outgoingMsg = message .. "\n"
 	local currHash = md5.tohex(md5.sum(outgoingMsg))
 
-	print("hashes", M.prevRecvdHash, currHash)
+	-- print("hashes", M.prevRecvdHash, currHash)
 	-- Send message followed by a newline
 	if M.prevRecvdHash == currHash then
 		return
@@ -169,7 +168,7 @@ function M.Send(message)
 		print("Failed to send message:", err)
 	else
 		M.prevRecvdHash = currHash
-		print("Sent message")
+		-- print("Sent message")
 	end
 end
 
@@ -189,17 +188,23 @@ function M.sendBuffer()
 		local outgoingMsg = message .. "\n"
 		local currHash = md5.tohex(md5.sum(outgoingMsg))
 
-		print("send hashes", prevMsg, M.prevRecvdHash, outgoingMsg, currHash)
+		-- print("send hashes", prevMsg, M.prevRecvdHash, outgoingMsg, currHash)
 
 		if M.prevSentHash == currHash then
 			-- M.previousBuffer = buffer
 			return
 		end
 
+		if op.op_id == "insert" then
+			M.crdt:insert(op)
+		elseif op.op_id == "remove" then
+			M.crdt:delete(op)
+		end
+
 		local success, err = M.conn:send(outgoingMsg)
 		if success then
 			M.prevSentHash = currHash
-			prevMsg = outgoingMsg
+			-- prevMsg = outgoingMsg
 			print("Sent message:", outgoingMsg)
 		else
 			print("Failed to send message:", err)
@@ -221,25 +226,48 @@ function M:generateSendOpts(buffer)
 			local currChar = line:sub(col, col)
 			local prevChar = prevLine:sub(col, col)
 
-			if currChar ~= prevChar then
+			-- Fetch the current state from the CRDT's skiplist (row, col)
+			local stateOp = M.crdt:stateAt(row, col)
+			local stateData = stateOp and stateOp.data or nil
+			local replicaID = stateOp and stateOp.replica_id or M.replicaID
+
+			local newOp = nil
+
+			if stateOp ~= nil and currChar ~= stateData then
+				replicaID = M.replicaID
+			elseif stateOp ~= nil then
+				replicaID = stateOp.replica_id
+			end
+			print("hhhhhe", currChar, prevChar, dump(stateOp), "data", stateData, "replica", replicaID)
+
+			-- Determine if a change is needed (insertion/deletion)
+			if currChar ~= stateData then
 				if currChar ~= "" then
-					table.insert(operations, {
-						replica_id = M.replicaID,
+					newOp = {
+						replica_id = replicaID,
 						row = row,
 						col = col,
 						data = currChar,
 						op_id = "insert",
-					})
+					}
 				end
+
 				if prevChar ~= "" then
-					table.insert(operations, {
-						replica_id = M.replicaID,
+					-- Create a remove operation
+					newOp = {
+						replica_id = replicaID,
 						row = row,
 						col = col,
 						data = prevChar,
 						op_id = "remove",
-					})
+					}
 				end
+			end
+
+			print(dump(newOp), dump(stateOp), replicaID, M.replicaID, "newOp")
+			-- Add the operation to the list if it is valid
+			if newOp ~= nil then
+				table.insert(operations, newOp)
 			end
 		end
 	end
@@ -247,34 +275,72 @@ function M:generateSendOpts(buffer)
 	return operations
 end
 
-function M.parseOld(data)
-	local currHash = md5.tohex(md5.sum(data))
-	if M.prevHash == currHash then
-		return
+function M:generateSendOptss(buffer)
+	local operations = {}
+
+	-- Track changes between the current and previous buffer states
+	for row, line in ipairs(buffer) do
+		local prevLine = M.previousBuffer and M.previousBuffer[row] or ""
+		local maxLength = math.max(#line, #prevLine)
+
+		for col = 1, maxLength do
+			local currChar = line:sub(col, col)
+			local prevChar = prevLine:sub(col, col)
+
+			local op, data = M.crdt:stateAt(row, col)
+			local replicaID = M.replicaID
+
+			print("generator1", op)
+
+			if op ~= nil then
+				replicaID = op.replica_id
+			end
+
+			print("generator", row, col, replicaID, M.replicaID, data)
+			local newOp = nil
+
+			if currChar ~= prevChar then
+				if currChar ~= "" then
+					newOp = {
+						replica_id = replicaID,
+						row = row,
+						col = col,
+						data = currChar,
+						op_id = "insert",
+					}
+				end
+				if prevChar ~= "" then
+					newOp = {
+						replica_id = replicaID,
+						row = row,
+						col = col,
+						data = prevChar,
+						op_id = "remove",
+					}
+				end
+			end
+
+			if newOp ~= nil then
+				table.insert(operations, newOp)
+			end
+		end
 	end
 
-	M.prevHash = currHash
-	local mode, line = M:parseOps(data)
+	return operations
+end
 
-	line = line:gsub("\\xn", "\n")
-
-	if mode == "i" then
-		vim.schedule(function()
-			print("Received text to insert: " .. line)
-
-			local lines = vim.split(line, "\n", { trimempty = true })
-			local buf = vim.api.nvim_get_current_buf()
-
-			vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-		end)
-	elseif mode == "v" then
-		vim.schedule(function()
-			print("Executing Vim command: " .. line)
-
-			vim.api.nvim_command(line)
-		end)
+function dump(o)
+	if type(o) == "table" then
+		local s = "{ "
+		for k, v in pairs(o) do
+			if type(k) ~= "number" then
+				k = '"' .. k .. '"'
+			end
+			s = s .. "[" .. k .. "] = " .. dump(v) .. ","
+		end
+		return s .. "} "
 	else
-		print("Unsupported mode received:", mode)
+		return tostring(o)
 	end
 end
 
@@ -282,7 +348,18 @@ function M.parse(data)
 	local replica_id, operations = M:parseOps(data)
 	local mode = "n"
 
+	print("receiving", replica_id, M.replicaID)
+
 	for _, op in ipairs(operations) do
+		if replica_id == M.replicaID then
+			print("replica id matches skipping")
+			goto continue
+		end
+
+		op.replica_id = replica_id
+
+		print("insert ", dump(op))
+
 		if op.op_id == "insert" then
 			M.crdt:insert(op)
 			mode = "i"
@@ -290,6 +367,7 @@ function M.parse(data)
 			M.crdt:delete(op)
 			mode = "i"
 		end
+		::continue::
 	end
 
 	if mode == "i" then

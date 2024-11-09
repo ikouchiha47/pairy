@@ -28,5 +28,6 @@ ip link set veth0 up
 ip netns exec localnamespace ip link set veth1 up
 ip netns exec localnamespace ip link set lo up
 
-echo "ip netns exec localnamespace ip link set veth1 up"
+echo "To exec into SHELL"
+echo "ip netns exec localnamespace bash"
 # ip netns exec localnamespace ping "$E0IP"

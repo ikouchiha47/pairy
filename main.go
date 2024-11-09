@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -73,10 +74,16 @@ func handleConnection(conn net.Conn) {
 
 	for {
 		message, err := reader.ReadString('\n')
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), "timeout") {
 			log.Printf("Error reading from client: %v", err)
 			return
 		}
+
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
 		log.Print("Received:", message)
 
 		// if message == "get_replica_id\n" {
