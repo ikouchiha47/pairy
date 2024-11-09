@@ -205,7 +205,7 @@ function M.sendBuffer()
 		if success then
 			M.prevSentHash = currHash
 			-- prevMsg = outgoingMsg
-			print("Sent message:", outgoingMsg)
+			-- print("Sent message:", outgoingMsg)
 		else
 			print("Failed to send message:", err)
 		end
@@ -238,7 +238,7 @@ function M:generateSendOpts(buffer)
 			elseif stateOp ~= nil then
 				replicaID = stateOp.replica_id
 			end
-			print("hhhhhe", currChar, prevChar, dump(stateOp), "data", stateData, "replica", replicaID)
+			-- print("hhhhhe", currChar, prevChar, dump(stateOp), "data", stateData, "replica", replicaID)
 
 			-- Determine if a change is needed (insertion/deletion)
 			if currChar ~= stateData then
@@ -264,7 +264,7 @@ function M:generateSendOpts(buffer)
 				end
 			end
 
-			print(dump(newOp), dump(stateOp), replicaID, M.replicaID, "newOp")
+			-- print(dump(newOp), dump(stateOp), replicaID, M.replicaID, "newOp")
 			-- Add the operation to the list if it is valid
 			if newOp ~= nil then
 				table.insert(operations, newOp)
@@ -275,91 +275,36 @@ function M:generateSendOpts(buffer)
 	return operations
 end
 
-function M:generateSendOptss(buffer)
-	local operations = {}
-
-	-- Track changes between the current and previous buffer states
-	for row, line in ipairs(buffer) do
-		local prevLine = M.previousBuffer and M.previousBuffer[row] or ""
-		local maxLength = math.max(#line, #prevLine)
-
-		for col = 1, maxLength do
-			local currChar = line:sub(col, col)
-			local prevChar = prevLine:sub(col, col)
-
-			local op, data = M.crdt:stateAt(row, col)
-			local replicaID = M.replicaID
-
-			print("generator1", op)
-
-			if op ~= nil then
-				replicaID = op.replica_id
-			end
-
-			print("generator", row, col, replicaID, M.replicaID, data)
-			local newOp = nil
-
-			if currChar ~= prevChar then
-				if currChar ~= "" then
-					newOp = {
-						replica_id = replicaID,
-						row = row,
-						col = col,
-						data = currChar,
-						op_id = "insert",
-					}
-				end
-				if prevChar ~= "" then
-					newOp = {
-						replica_id = replicaID,
-						row = row,
-						col = col,
-						data = prevChar,
-						op_id = "remove",
-					}
-				end
-			end
-
-			if newOp ~= nil then
-				table.insert(operations, newOp)
-			end
-		end
-	end
-
-	return operations
-end
-
-function dump(o)
-	if type(o) == "table" then
-		local s = "{ "
-		for k, v in pairs(o) do
-			if type(k) ~= "number" then
-				k = '"' .. k .. '"'
-			end
-			s = s .. "[" .. k .. "] = " .. dump(v) .. ","
-		end
-		return s .. "} "
-	else
-		return tostring(o)
-	end
-end
+-- function dump(o)
+-- 	if type(o) == "table" then
+-- 		local s = "{ "
+-- 		for k, v in pairs(o) do
+-- 			if type(k) ~= "number" then
+-- 				k = '"' .. k .. '"'
+-- 			end
+-- 			s = s .. "[" .. k .. "] = " .. dump(v) .. ","
+-- 		end
+-- 		return s .. "} "
+-- 	else
+-- 		return tostring(o)
+-- 	end
+-- end
 
 function M.parse(data)
 	local replica_id, operations = M:parseOps(data)
 	local mode = "n"
 
-	print("receiving", replica_id, M.replicaID)
+	-- print("receiving", replica_id, M.replicaID)
 
 	for _, op in ipairs(operations) do
 		if replica_id == M.replicaID then
-			print("replica id matches skipping")
+			-- print("replica id matches skipping")
 			goto continue
 		end
 
 		op.replica_id = replica_id
 
-		print("insert ", dump(op))
-
+		-- print("insert ", dump(op))
 		if op.op_id == "insert" then
 			M.crdt:insert(op)
 			mode = "i"
