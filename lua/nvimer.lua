@@ -14,10 +14,12 @@
 -- ]]
 
 local md5 = require("md5")
-local typer = require("track_typer")
 local Crdt = require("crdt")
+local LocalServe = require("server")
 
 local M = {
+	pwd = "",
+
 	socket = nil,
 	conn = nil,
 	lconn = nil,
@@ -32,6 +34,9 @@ local M = {
 	participant_is_user = true,
 	typing_active = false,
 	previousBuffer = nil,
+
+	serverTimerHandle = nil,
+	receiverTimerHandle = nil,
 }
 
 local laddr = ""
@@ -54,6 +59,7 @@ function M.setup(opts)
 	M.replicaID = md5.tohex(md5.sum(M.getMacAddress() .. tostring(os.time())))
 
 	M.crdt = Crdt:new(M.replicaID)
+	M.pwd = pwd
 end
 
 function M.getMacAddress()
@@ -74,12 +80,21 @@ function M.getMacAddress()
 	return "00:00:00:00:00:00"
 end
 
+function M.LocalConnect()
+	if not LocalServe.isRunning() then
+		local execPath = M.pwd .. "/main.go"
+		LocalServe.runGoServer({ "run", execPath })
+	end
+end
+
 -- Connect to the TCP server
 function M.Connect(address)
 	if not M.socket then
 		print("Failed to connect to socket")
 		return
 	end
+
+	M.LocalConnect()
 
 	M.lconn = M.socket.tcp()
 	M.conn = M.socket.tcp()
@@ -107,15 +122,17 @@ function M.Connect(address)
 end
 
 function M.serverD()
-	vim.loop.new_timer():start(
+	if M.serverTimerHandle ~= nil then
+		M.serverTimerHandle:stop()
+		M.serverTimerHandle = nil
+	end
+
+	M.serverTimerHandle = vim.loop.new_timer()
+
+	M.serverTimerHandle:start(
 		0,
 		500,
 		vim.schedule_wrap(function()
-			-- local msg = M.currentBuffer()
-			--
-			-- if msg ~= "" then
-			-- 	M.Send(msg)
-			-- end
 			M.sendBuffer()
 		end)
 	)
@@ -127,7 +144,13 @@ function M.receiverD()
 		return
 	end
 
-	vim.loop.new_timer():start(
+	if M.receiverTimerHandle ~= nil then
+		M.receiverTimerHandle:stop()
+		M.receiverTimerHandle = nil
+	end
+
+	M.receiverTimerHandle = vim.loop.new_timer()
+	M.receiverTimerHandle:start(
 		0,
 		100,
 		vim.schedule_wrap(function()
@@ -152,16 +175,16 @@ function M.Send(message)
 		return
 	end
 
+	-- Send message followed by a newline
 	local outgoingMsg = message .. "\n"
 	local currHash = md5.tohex(md5.sum(outgoingMsg))
 
 	-- print("hashes", M.prevRecvdHash, currHash)
-	-- Send message followed by a newline
 	if M.prevRecvdHash == currHash then
 		return
 	end
 
-	print("sending", outgoingMsg)
+	-- print("sending", outgoingMsg)
 
 	local success, err = M.conn:send(outgoingMsg)
 	if not success then
@@ -171,8 +194,6 @@ function M.Send(message)
 		-- print("Sent message")
 	end
 end
-
-local prevMsg = ""
 
 function M.sendBuffer()
 	if not M.lconn then
@@ -372,14 +393,34 @@ end
 
 -- Close the connection
 function M.UnPair()
+	if M.receiverTimerHandle ~= nil then
+		M.receiverTimerHandle:stop()
+		M.receiverTimerHandle = nil
+	end
+
 	if M.conn then
 		M.conn:close()
 		M.conn = nil
 
+		print("Connections closed.")
+	end
+
+	if M.lconn then
 		M.lconn:close()
 		M.lconn = nil
+	end
+end
 
-		print("Connections closed.")
+function M.Kill()
+	if M.serverTimerHandle ~= nil then
+		M.serverTimerHandle:stop()
+		M.serverTimerHandle = nil
+	end
+
+	M.UnPair()
+
+	if LocalServe.isRunning() then
+		LocalServe.stopGoServer()
 	end
 end
 

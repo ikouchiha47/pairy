@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os/signal"
@@ -19,7 +21,13 @@ var (
 )
 
 func main() {
-	listener, err := net.Listen("tcp", ":8080")
+	var network *string
+	var port *int
+
+	flag.StringVar(network, "net", "tcp", "network mode")
+	flag.IntVar(port, "port", 56378, "port")
+
+	listener, err := net.Listen(*network, fmt.Sprintf(":%d", *port))
 	if err != nil {
 		log.Println("Error starting server:", err)
 		return

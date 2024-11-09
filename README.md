@@ -19,8 +19,9 @@ return {
   config = function()
     local Pairy = require 'nvimer'
     Pairy.setup {
-      dir = dir,
+      pwd = dir,
       laddr = '0.0.0.0',
+      lport = 8080,
     }
   end,
 }
@@ -28,4 +29,7 @@ return {
 
 ## Usage
 
-- `:Pair <address>`
+- `:PairyServe`
+- `:PairyPair <address>`
+- `:PairyUnpair`
+- `:PairyKill`
